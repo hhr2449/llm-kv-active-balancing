@@ -1,0 +1,16 @@
+parameter_status: development_simulator_intervention_budgets_not_production_calibrated
+nominal_mapping_tier: MEDIUM
+tiers:
+  LOW:
+    proactive_byte_rate: 25000000
+    proactive_burst_bytes: 67108864
+  MEDIUM:
+    proactive_byte_rate: 100000000
+    proactive_burst_bytes: 268435456
+action_caps: [1, 2]
+oracle_horizons_ms: [30000, 60000, 300000]
+trigger_periods_ms: [3000, 6000, 12000]
+phase_fractions: [0, 0.3333333333333333, 0.6666666666666666]
+allowed_metric_split: DEVELOPMENT
+oracle_visibility_end_ms: 900000
+

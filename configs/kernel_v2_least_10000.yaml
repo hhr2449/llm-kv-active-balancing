@@ -1,0 +1,10 @@
+simulator:
+  page_tokens: 512
+  base_latency_ms: 2.0
+  prefill_tokens_per_second: 10000.0
+cache:
+  capacity_pages: 10000
+cluster:
+  num_pods: 4
+routing:
+  policy: R_LEAST

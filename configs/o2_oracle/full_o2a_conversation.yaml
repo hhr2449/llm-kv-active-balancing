@@ -1,0 +1,11 @@
+simulator: {page_tokens: 512}
+service: {base_latency_ms: 2.0, prefill_tokens_per_second: 10000.0}
+cache: {capacity_pages: 585}
+cluster: {num_pods: 4}
+routing: {policy: R_REQ_KV, cache_hit_threshold: 0.3, relative_load_threshold: 1.5, absolute_load_gap_ms: 500.0}
+transfer: {enabled: true, theta_simple: 2.0, admission_timeout_ms: 5000, partial_page_mode: FULL_PAGE_ONLY, transfer_mode: FULL_PREFIX, page_bytes: 14680064, effective_bandwidth_bytes_per_s: 25000000000, control_latency_ms: 1.0}
+proactive: {enabled: true, action: COPY, strategy: FUTURE_DEMAND, trigger_period_ms: 1000, trigger_phase_ms: 1500000, max_proactive_actions_per_tick: 1, proactive_byte_rate: 28626124.8, proactive_burst_bytes: 8587837440, initial_tokens: 0, no_evict_admission: false, fanout_targets: 1}
+oracle: {policy: T_FUTURE_DEMAND, horizon_ms: 300000, visibility_end_ms: 3537000}
+split: {development_start_ms: 0, warmup_start_ms: 900000, evaluation_start_ms: 1500000, observation_tail_start_ms: 2700000}
+experiment: {protocol_version: TASKMAIN_V1_1, random_seed: 20260911, arrival_mode: RAW_BUCKETED, summary_split: EVALUATION}
+full_o2a: {workload: Conversation, decision_start_ms: 1500000, decision_end_ms: 2700000, decision_period_ms: 1000, top_m: 5, checkpoint_period_decisions: 50}

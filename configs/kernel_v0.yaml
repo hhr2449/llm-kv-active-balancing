@@ -1,0 +1,16 @@
+simulator:
+  # Trace page identity is fixed by the Mooncake dataset.
+  page_tokens: 512
+  # Kernel v0 assumptions; these are not claimed as production measurements.
+  base_latency_ms: 2.0
+  prefill_tokens_per_second: 10000.0
+
+cache:
+  # null preserves Kernel v0 infinite-cache behavior.
+  capacity_pages: null
+
+cluster:
+  num_pods: 1
+
+routing:
+  policy: FIXED
