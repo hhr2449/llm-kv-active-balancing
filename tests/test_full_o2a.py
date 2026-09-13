@@ -1,7 +1,12 @@
 import json
 import random
+import concurrent.futures
+import multiprocessing
 
-from src.simulator.full_o2a import checkpoint, load_checkpoint
+from src.simulator.config import SimulatorConfig, SplitConfig
+from src.simulator.full_o2a import (_init_worker, checkpoint, evaluate_decision,
+                                   load_checkpoint)
+from src.simulator.trace import TraceRequest
 
 
 def controller_state():
@@ -49,3 +54,28 @@ def test_resume_rejects_hash_mismatch(tmp_path):
         assert "config_hash mismatch" in str(error)
     else:
         raise AssertionError("mismatched checkpoint was accepted")
+
+
+def test_parallel_branch_evaluation_exactly_matches_sequential():
+    split = SplitConfig(0, 900_000, 1_500_000, 2_700_000)
+    base = SimulatorConfig(
+        512, 2, 10_000, 20, 4, "R_REQ_KV", True,
+        page_bytes=1, effective_bandwidth_bytes_per_s=1_000_000,
+        control_latency_ms=1, split_config=split, summary_split="EVALUATION",
+        proactive_enabled=True, trigger_period_ms=1000,
+        proactive_byte_rate=1000, proactive_burst_bytes=1000,
+        proactive_initial_tokens=1000, oracle_horizon_ms=300_000,
+        oracle_visibility_end_ms=3_537_000, protocol_version="TASKMAIN_V1_1",
+    )
+    def request(index, arrival, block):
+        return TraceRequest.from_record(index, {
+            "timestamp": arrival, "input_length": 512, "output_length": 0,
+            "hash_ids": [block],
+        }, split_config=split)
+    requests = [request(0, 0, 1), request(1, 1_500_100, 1)]
+    sequential = evaluate_decision(base, requests, [], 1_500_000, None)
+    with concurrent.futures.ProcessPoolExecutor(
+            max_workers=2, mp_context=multiprocessing.get_context("fork"),
+            initializer=_init_worker, initargs=(base, requests)) as executor:
+        parallel = evaluate_decision(base, requests, [], 1_500_000, executor)
+    assert sequential == parallel

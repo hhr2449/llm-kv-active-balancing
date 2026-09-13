@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -8,6 +9,7 @@ import pickle
 import random
 import subprocess
 import time
+import multiprocessing
 from dataclasses import asdict
 from pathlib import Path
 from statistics import fmean
@@ -20,6 +22,41 @@ from .o2a import TOP_M, choose_action
 from .o2a_smoke import current_action_record, fingerprint, replay
 from .o2p import branch_metrics, cohort
 from .trace import load_trace
+
+
+_WORKER_BASE = None
+_WORKER_REQUESTS = None
+
+
+def _init_worker(base, requests) -> None:
+    global _WORKER_BASE, _WORKER_REQUESTS
+    _WORKER_BASE, _WORKER_REQUESTS = base, requests
+
+
+def _cohort_digest(results, now: float) -> str:
+    ids = [result.request_id for result in cohort(results, now)]
+    return hashlib.sha256(repr(ids).encode()).hexdigest()
+
+
+def _evaluate_copy_worker(spec):
+    candidate, target, committed, now = spec
+    proposed = (*committed, (now, int(candidate["prefix_id"]),
+                             int(candidate["source_pod"]), int(target)))
+    results, summary = replay(_WORKER_BASE, _WORKER_REQUESTS, proposed, now)
+    record = current_action_record(summary, now)
+    metrics = branch_metrics(results, summary, now, int(target), _WORKER_BASE.page_bytes)
+    return {
+        "prefix_id": int(candidate["prefix_id"]),
+        "prefix_rank": int(candidate["o1_rank"]),
+        "prefix_depth_pages": int(candidate["prefix_depth_pages"]),
+        "source_pod": int(candidate["source_pod"]), "target_pod": int(target),
+        "copy_bytes": int(candidate["transferable_pages"]) * _WORKER_BASE.page_bytes,
+        "action_success": record is not None,
+        "loss_total": metrics["loss_total"],
+        "state_fingerprint": fingerprint(summary, now),
+        "validation_fingerprint": fingerprint(summary, now, True),
+        "cohort_digest": _cohort_digest(results, now),
+    }
 
 
 def sha256(path: Path) -> str:
@@ -88,7 +125,7 @@ def load_checkpoint(path: Path, workload: str, commit: str,
     return int(controller.pop("next_decision_index")), simulator["committed_actions"], controller
 
 
-def evaluate_decision(base, requests, committed, now):
+def evaluate_decision(base, requests, committed, now, executor=None):
     no_results, no_summary = replay(base, requests, committed, now)
     probes = no_summary["proactive"]["o2a_candidate_states"]
     if len(probes) != 1:
@@ -97,30 +134,23 @@ def evaluate_decision(base, requests, committed, now):
     state_hash = fingerprint(no_summary, now)
     validation_hash = fingerprint(no_summary, now, True)
     no_metrics = branch_metrics(no_results, no_summary, now, None, base.page_bytes)
-    cohort_ids = [result.request_id for result in cohort(no_results, now)]
-    copies = []
+    cohort_hash = _cohort_digest(no_results, now)
+    specs = []
     for candidate in candidates:
         for target in candidate["legal_targets"]:
-            proposed = (*committed, (now, int(candidate["prefix_id"]),
-                                     int(candidate["source_pod"]), int(target)))
-            results, summary = replay(base, requests, proposed, now)
-            if (fingerprint(summary, now) != state_hash
-                    or fingerprint(summary, now, True) != validation_hash):
+            specs.append((candidate, target, tuple(committed), now))
+    if executor is None:
+        _init_worker(base, requests)
+        copies = list(map(_evaluate_copy_worker, specs))
+    else:
+        copies = list(executor.map(_evaluate_copy_worker, specs))
+    for row in copies:
+            if (row.pop("state_fingerprint") != state_hash
+                    or row.pop("validation_fingerprint") != validation_hash):
                 raise AssertionError("formal O2-A branch isolation violated")
-            if [result.request_id for result in cohort(results, now)] != cohort_ids:
+            if row.pop("cohort_digest") != cohort_hash:
                 raise AssertionError("formal O2-A branch cohort mismatch")
-            record = current_action_record(summary, now)
-            metrics = branch_metrics(results, summary, now, int(target), base.page_bytes)
-            row = {
-                "prefix_id": int(candidate["prefix_id"]),
-                "prefix_rank": int(candidate["o1_rank"]),
-                "prefix_depth_pages": int(candidate["prefix_depth_pages"]),
-                "source_pod": int(candidate["source_pod"]), "target_pod": int(target),
-                "copy_bytes": int(candidate["transferable_pages"]) * base.page_bytes,
-                "action_success": record is not None,
-                "delta_loss_total": no_metrics["loss_total"] - metrics["loss_total"],
-            }
-            copies.append(row)
+            row["delta_loss_total"] = no_metrics["loss_total"] - row.pop("loss_total")
     best, action_type = choose_action(copies)
     return candidates, copies, best, action_type, no_results, no_summary, state_hash
 
@@ -190,9 +220,13 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--checkpoint-root", type=Path, required=True)
     parser.add_argument("--resume", type=Path)
+    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--max-decisions-this-run", type=int)
     args = parser.parse_args()
     if args.output.exists():
         raise FileExistsError(f"refusing to overwrite output: {args.output}")
+    if args.workers <= 0:
+        raise ValueError("workers must be positive")
     raw = yaml.safe_load(args.config.read_text(encoding="utf-8"))
     formal = raw["full_o2a"]
     if int(formal["top_m"]) != TOP_M or float(formal["decision_period_ms"]) != 1000:
@@ -218,10 +252,19 @@ def main() -> None:
         print(f"[Full O2-A] resumed at decision {start_index}/{len(times)}", flush=True)
     started = time.monotonic()
     latest_results = latest_summary = None
-    for index in range(start_index, len(times)):
+    stop_index = len(times) if args.max_decisions_this_run is None else min(
+        len(times), start_index + args.max_decisions_this_run)
+    executor_context = (
+        concurrent.futures.ProcessPoolExecutor(
+            max_workers=args.workers, mp_context=multiprocessing.get_context("fork"),
+            initializer=_init_worker, initargs=(base, requests),
+        ) if args.workers > 1 else None
+    )
+    try:
+      for index in range(start_index, stop_index):
         now = times[index]
         candidates, copies, best, action_type, latest_results, latest_summary, state_hash = \
-            evaluate_decision(base, requests, committed, now)
+            evaluate_decision(base, requests, committed, now, executor_context)
         controller["candidate_count"] += len(candidates)
         controller["evaluated_action_count"] += 1 + len(copies)
         controller["branch_count"] += 1 + len(copies)
@@ -261,6 +304,13 @@ def main() -> None:
                 latest_results, latest_summary,
             )
             print(f"[Full O2-A] checkpoint {location}", flush=True)
+    finally:
+        if executor_context is not None:
+            executor_context.shutdown(wait=True, cancel_futures=True)
+
+    if stop_index < len(times):
+        print(f"[Full O2-A] validation stop after decision {stop_index}/{len(times)}", flush=True)
+        return
 
     final_probe = times[-1] + float(formal["decision_period_ms"])
     final_results, engine_summary = replay(base, requests, committed, final_probe)

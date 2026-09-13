@@ -562,8 +562,8 @@ class SimulatorEngine:
                                            for rank, item in enumerate(eligible[:5], start=1)],
                         })
                         if closed_probe:
-                            proactive_stats["o2a_closed_state_fingerprints"][str(now)] = fingerprint
-                            proactive_stats["o2a_closed_validation_fingerprints"][str(now)] = validation_fingerprint(now)
+                            proactive_stats["o2a_closed_state_fingerprints"][str(float(now))] = fingerprint
+                            proactive_stats["o2a_closed_validation_fingerprints"][str(float(now))] = validation_fingerprint(now)
                         continue
                     for item in eligible:
                         proactive_stats["o2p_candidate_states"].append({
@@ -582,8 +582,8 @@ class SimulatorEngine:
                 if forced_copy:
                     fingerprint = state_fingerprint(now)
                     proactive_stats["o2p_state_fingerprint"] = fingerprint
-                    proactive_stats["o2a_closed_state_fingerprints"][str(now)] = fingerprint
-                    proactive_stats["o2a_closed_validation_fingerprints"][str(now)] = validation_fingerprint(now)
+                    proactive_stats["o2a_closed_state_fingerprints"][str(float(now))] = fingerprint
+                    proactive_stats["o2a_closed_validation_fingerprints"][str(float(now))] = validation_fingerprint(now)
                     ranked = [item for item in ranked
                               if item[1].hash_id == forced_prefix]
                 started = 0

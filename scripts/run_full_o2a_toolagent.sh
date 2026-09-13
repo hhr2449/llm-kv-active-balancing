@@ -9,6 +9,7 @@ args=(
   --trace "$repo_root/data/mooncake/toolagent_trace.jsonl"
   --output "$repo_root/results/full_o2a/toolagent"
   --checkpoint-root "$repo_root/checkpoints/full_o2a/toolagent"
+  --workers "${FULL_O2A_WORKERS:-16}"
 )
 if [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
   args+=(--resume "$RESUME_CHECKPOINT")
