@@ -1,7 +1,0 @@
-simulator: {page_tokens: 512}
-service: {base_latency_ms: 2.0, prefill_tokens_per_second: 10000.0}
-cache: {capacity_pages: null}
-cluster: {num_pods: 4}
-routing: {policy: R_AFF}
-transfer: {enabled: false, cache_hit_threshold: 0.3, relative_load_threshold: 1.5, absolute_load_gap_ms: 500.0, admission_timeout_ms: 5000, partial_page_mode: FULL_PAGE_ONLY, transfer_mode: FULL_PREFIX, page_bytes: 1048576, effective_bandwidth_bytes_per_s: 10000000000, control_latency_ms: 0.1}
-experiment: {random_seed: 20260911, arrival_mode: RAW_BUCKETED}
