@@ -24,29 +24,45 @@ def task_weight(input_tokens: int) -> float:
 
 
 class ExternalDemandHistory:
-    """Policy-independent historical demand from external requests only."""
+    """Policy-independent demand from external requests observed by ``time_ms``.
 
-    def __init__(self, requests: Sequence[TraceRequest]) -> None:
+    The simulator uses the online ``observe`` path at REQUEST_ARRIVAL.  Accepting an
+    initial sequence remains useful for small unit tests and offline analysis.
+    """
+
+    def __init__(self, requests: Sequence[TraceRequest] = ()) -> None:
         observations: dict[int, list[tuple[float, int]]] = defaultdict(list)
-        for request in requests:
-            for block_id in dict.fromkeys(request.block_ids):
-                observations[block_id].append((request.arrival_ms, request.input_tokens))
-        self._values = {key: tuple(sorted(value)) for key, value in observations.items()}
+        self._values = observations
+        self._times: dict[int, list[float]] = defaultdict(list)
+        for request in sorted(requests, key=lambda item: (item.arrival_ms,
+                                                          item.request_id)):
+            self.observe(request)
+
+    def observe(self, request: TraceRequest) -> None:
+        observation = (request.arrival_ms, request.input_tokens)
+        for block_id in dict.fromkeys(request.block_ids):
+            values = self._values[block_id]
+            if values and values[-1][0] > request.arrival_ms:
+                raise ValueError("external demand history must be observed in time order")
+            values.append(observation)
+            self._times[block_id].append(request.arrival_ms)
 
     def window(self, block_id: int, time_ms: float,
                history_ms: float) -> tuple[tuple[float, int], ...]:
         values = self._values.get(block_id, ())
-        times = [item[0] for item in values]
+        times = self._times.get(block_id, ())
         left = bisect_right(times, time_ms - history_ms)
         right = bisect_right(times, time_ms)
         return values[left:right]
 
     def persistence(self, block_id: int, time_ms: float, history_ms: float) -> int:
-        return len(self.window(block_id, time_ms, history_ms))
+        times = self._times.get(block_id, ())
+        return (bisect_right(times, time_ms)
+                - bisect_right(times, time_ms - history_ms))
 
     def recency(self, block_id: int, time_ms: float, decay_seconds: float) -> float:
         values = self._values.get(block_id, ())
-        times = [item[0] for item in values]
+        times = self._times.get(block_id, ())
         right = bisect_right(times, time_ms)
         decay_ms = decay_seconds * 1000.0
         return sum(math.exp(-(time_ms - arrival) / decay_ms)

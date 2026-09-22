@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import csv
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import fmean
@@ -44,6 +45,36 @@ class RequestResult:
     wire_pages: int = 0
     wire_bytes: int = 0
     ticket_admission_wait_ms: float | None = None
+    reactive_ect_selected_plan_type: str | None = None
+    reactive_ect_selected_source: int | None = None
+    reactive_ect_selected_target: int | None = None
+    reactive_ect_selected_ect_ms: float | None = None
+    reactive_ect_best_direct_target: int | None = None
+    reactive_ect_best_direct_ect_ms: float | None = None
+    reactive_ect_best_copy_source: int | None = None
+    reactive_ect_best_copy_target: int | None = None
+    reactive_ect_best_copy_ect_ms: float | None = None
+    reactive_ect_estimated_copy_advantage_ms: float | None = None
+    reactive_ect_final_plan_type: str | None = None
+    reactive_ect_final_source: int | None = None
+    reactive_ect_final_target: int | None = None
+    reactive_ect_final_ect_ms: float | None = None
+    reactive_ect_copy_selected: bool = False
+    reactive_ect_copy_completed: bool = False
+    reactive_ect_wire_bytes: int = 0
+    reactive_ect_current_hit_tokens: int | None = None
+    reactive_ect_post_copy_hit_tokens: int | None = None
+    reactive_ect_direct_candidate_count: int = 0
+    reactive_ect_copy_candidate_count: int = 0
+    reactive_ect_replan_count: int = 0
+    reactive_ect_fallback: bool = False
+    reactive_ect_endpoint_blocked: bool = False
+    reactive_ect_capacity_blocked: bool = False
+    b0_transfer_considered: bool = False
+    b0_gate_outcome: str | None = None
+    b0_replan_count: int = 0
+    b0_endpoint_blocked: bool = False
+    b0_capacity_blocked: bool = False
 
 
 def _percentile(values: Sequence[float], q: float) -> float | None:
@@ -99,7 +130,9 @@ def _pod_summary(pod: Pod, results: Sequence[RequestResult], duration_ms: float,
     return {
         "pod_id": pod.pod_id,
         "routed_requests": len(own),
+        "completed_requests": len(own),
         "input_tokens": sum(result.input_tokens for result in own),
+        "output_tokens": sum(result.output_tokens for result in own),
         "h_route_pages": sum(result.h_route_pages for result in own),
         "h_route_tokens": sum(result.h_route_tokens for result in own),
         "h_used_pages": sum(result.h_used_pages for result in own),
@@ -375,3 +408,63 @@ def write_outputs(output_dir: str | Path, results: Sequence[RequestResult],
                   "", "## Per Pod", "", "```json",
                   json.dumps(summary["per_pod"], indent=2, sort_keys=True), "```"])
     (output / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    plan_results = [
+        result for result in results
+        if result.reactive_ect_selected_plan_type is not None
+        and (summary.get("metric_scope") == "FULL_REPLAY"
+             or result.split == summary.get("metric_scope"))
+    ]
+    if plan_results:
+        fields = [
+            "request_id", "arrival_ms", "selected_plan_type",
+            "selected_source", "selected_target", "selected_ect_ms",
+            "best_direct_target", "best_direct_ect_ms", "best_copy_source",
+            "best_copy_target", "best_copy_ect_ms",
+            "estimated_copy_advantage_ms", "actual_queue_ms",
+            "actual_service_ms", "actual_completion_ms", "copy_selected",
+            "copy_completed", "wire_bytes", "current_hit_tokens",
+            "post_copy_hit_tokens", "final_plan_type", "final_source",
+            "final_target", "final_ect_ms", "replan_count", "fallback",
+            "endpoint_blocked", "capacity_blocked", "direct_candidate_count",
+            "copy_candidate_count",
+        ]
+        with (output / "reactive_plan_records.csv").open(
+            "w", newline="", encoding="utf-8"
+        ) as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields)
+            writer.writeheader()
+            for result in sorted(plan_results, key=lambda item: item.request_id):
+                writer.writerow({
+                    "request_id": result.request_id,
+                    "arrival_ms": result.arrival_ms,
+                    "selected_plan_type": result.reactive_ect_selected_plan_type,
+                    "selected_source": result.reactive_ect_selected_source,
+                    "selected_target": result.reactive_ect_selected_target,
+                    "selected_ect_ms": result.reactive_ect_selected_ect_ms,
+                    "best_direct_target": result.reactive_ect_best_direct_target,
+                    "best_direct_ect_ms": result.reactive_ect_best_direct_ect_ms,
+                    "best_copy_source": result.reactive_ect_best_copy_source,
+                    "best_copy_target": result.reactive_ect_best_copy_target,
+                    "best_copy_ect_ms": result.reactive_ect_best_copy_ect_ms,
+                    "estimated_copy_advantage_ms": (
+                        result.reactive_ect_estimated_copy_advantage_ms
+                    ),
+                    "actual_queue_ms": result.queue_time_ms,
+                    "actual_service_ms": result.service_time_ms,
+                    "actual_completion_ms": result.completion_latency_ms,
+                    "copy_selected": result.reactive_ect_copy_selected,
+                    "copy_completed": result.reactive_ect_copy_completed,
+                    "wire_bytes": result.reactive_ect_wire_bytes,
+                    "current_hit_tokens": result.reactive_ect_current_hit_tokens,
+                    "post_copy_hit_tokens": result.reactive_ect_post_copy_hit_tokens,
+                    "final_plan_type": result.reactive_ect_final_plan_type,
+                    "final_source": result.reactive_ect_final_source,
+                    "final_target": result.reactive_ect_final_target,
+                    "final_ect_ms": result.reactive_ect_final_ect_ms,
+                    "replan_count": result.reactive_ect_replan_count,
+                    "fallback": result.reactive_ect_fallback,
+                    "endpoint_blocked": result.reactive_ect_endpoint_blocked,
+                    "capacity_blocked": result.reactive_ect_capacity_blocked,
+                    "direct_candidate_count": result.reactive_ect_direct_candidate_count,
+                    "copy_candidate_count": result.reactive_ect_copy_candidate_count,
+                })

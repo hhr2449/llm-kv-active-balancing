@@ -75,6 +75,7 @@ class SimulatorConfig:
     proactive_fanout_targets: int = 1
     proactive_trigger_latest_ms: float | None = None
     proactive_strategy: str = "FUTURE_DEMAND"
+    proactive_information_scope: str | None = None
     proactive_initial_tokens: float | None = None
     persistence_history_ms: float = 60000.0
     persistence_top_k: int = 10
@@ -91,6 +92,7 @@ class SimulatorConfig:
     o2p_arrival_cutoff_ms: float | None = None
     o2a_committed_actions: tuple[tuple[float, int, int, int], ...] = ()
     o2a_probe_time_ms: float | None = None
+    reactive_information_scope: str | None = None
 
     def __post_init__(self) -> None:
         if self.page_tokens <= 0:
@@ -103,8 +105,23 @@ class SimulatorConfig:
             raise ValueError("cache.capacity_pages must be >= 0 or null")
         if self.num_pods <= 0:
             raise ValueError("cluster.num_pods must be > 0")
-        if self.routing_policy not in {"FIXED", "R_AFF", "R_LEAST", "R_REQ_KV_SIMPLE", "R_REQ_KV", "R_REQ_KV_TASK"}:
+        if self.routing_policy not in {"FIXED", "R_AFF", "R_LEAST", "R_REQ_KV_SIMPLE", "R_REQ_KV", "R_REQ_KV_TASK", "R_REACTIVE_ECT_V1"}:
             raise ValueError("unsupported routing.policy")
+        if self.reactive_information_scope not in {None, "current_state_only"}:
+            raise ValueError("unsupported routing.information_scope")
+        if self.routing_policy == "R_REACTIVE_ECT_V1":
+            if self.reactive_information_scope != "current_state_only":
+                raise ValueError(
+                    "R_REACTIVE_ECT_V1 requires routing.information_scope=current_state_only"
+                )
+            if not self.transfer_enabled:
+                raise ValueError("R_REACTIVE_ECT_V1 requires transfer.enabled")
+            if (self.proactive_enabled
+                    and self.proactive_information_scope != "history_current_only"):
+                raise ValueError(
+                    "R_REACTIVE_ECT_V1 only permits the frozen history_current_only "
+                    "proactive controller"
+                )
         if self.theta_simple <= 0 or self.page_bytes <= 0:
             raise ValueError("transfer theta/page_bytes must be positive")
         if self.effective_bandwidth_bytes_per_s <= 0 or self.control_latency_ms < 0:
@@ -133,6 +150,21 @@ class SimulatorConfig:
             raise ValueError("proactive fanout_targets must be 1 or 2")
         if self.proactive_strategy not in {"FUTURE_DEMAND", "PERSIST", "RECENCY", "COST_AWARE"}:
             raise ValueError("unsupported proactive.strategy")
+        if self.proactive_information_scope not in {None, "history_current_only"}:
+            raise ValueError("unsupported proactive.information_scope")
+        if self.proactive_information_scope == "history_current_only":
+            if not self.proactive_enabled:
+                raise ValueError("history_current_only requires proactive.enabled")
+            if self.proactive_strategy not in {"PERSIST", "COST_AWARE"}:
+                raise ValueError(
+                    "history_current_only only supports PERSIST or COST_AWARE"
+                )
+            if (self.routing_policy not in {"R_REQ_KV", "R_REACTIVE_ECT_V1"}
+                    or not self.transfer_enabled):
+                raise ValueError(
+                    "history_current_only requires an R_REQ_KV_V1 or "
+                    "R_REACTIVE_ECT_V1 base"
+                )
         if self.persistence_history_ms <= 0 or self.persistence_top_k <= 0:
             raise ValueError("invalid persistence parameters")
         if not 0 <= self.recency_selection_quantile <= 1 or self.recency_decay_seconds <= 0:
@@ -200,6 +232,10 @@ class SimulatorConfig:
             cache_capacity_pages=None if capacity is None else int(capacity),
             num_pods=int(cluster["num_pods"]),
             routing_policy=str(routing["policy"]),
+            reactive_information_scope=(
+                None if routing.get("information_scope") is None
+                else str(routing["information_scope"])
+            ),
             transfer_enabled=bool(transfer.get("enabled", False)),
             theta_simple=float(transfer.get("theta_simple", 1.5)),
             page_bytes=int(transfer.get("page_bytes", 1)),
@@ -239,6 +275,10 @@ class SimulatorConfig:
                 else float(proactive["trigger_latest_ms"])
             ),
             proactive_strategy=str(proactive.get("strategy", "FUTURE_DEMAND")),
+            proactive_information_scope=(
+                None if proactive.get("information_scope") is None
+                else str(proactive["information_scope"])
+            ),
             proactive_initial_tokens=(None if proactive.get("initial_tokens") is None
                                       else float(proactive["initial_tokens"])),
             persistence_history_ms=float(proactive.get("persistence_history_ms", 60000.0)),
