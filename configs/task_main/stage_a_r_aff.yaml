@@ -1,0 +1,10 @@
+protocol_version: TASK_MAIN_V1_STAGE_A
+workload: synthetic
+routing_policy: R_AFF
+num_pods: 4
+capacity_pages: 585
+page_tokens: 512
+page_bytes: 14680064
+bandwidth_bytes_per_second: 25000000000
+load_window_ms: 60000
+theta: 2

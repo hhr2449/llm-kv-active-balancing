@@ -75,6 +75,11 @@ class CandidateGenerator:
         }
         return tuple(sorted(self._endpoints | branching | published_endpoints))
 
+    def metadata(self, hash_id: int) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        """Return immutable online-known path metadata for instrumentation."""
+        path, valid = self._paths[hash_id]
+        return tuple(path), tuple(valid)
+
     def materialize(self, hash_id: int, pods: Sequence[Pod]) -> PrefixCandidate | None:
         path, valid = self._paths[hash_id]
         replicas = tuple(p.pod_id for p in pods if p.cache.lookup(path) == len(path))
@@ -136,6 +141,8 @@ class ReplicaGeneration:
     ready_time: float
     first_use_time: float | None = None
     eviction_time: float | None = None
+    actual_hit_pages: int = 0
+    hit_request_ids: list[int] = field(default_factory=list)
 
 
 @dataclass
